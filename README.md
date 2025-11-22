@@ -1,4 +1,3 @@
-# GS physcal Computing 
 
 # 📱🌌 ÓRBITA Mobile – Desk IoT
 
