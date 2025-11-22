@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>ÓRBITA Desk - Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #0b1220;
+      color: #e5e7eb;
+    }
+    header {
+      padding: 16px 24px;
+      background: #111827;
+      border-bottom: 1px solid #1f2933;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 20px;
+    }
+    main {
+      padding: 20px 24px 40px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: #111827;
+      border-radius: 12px;
+      padding: 12px 14px;
+      border: 1px solid #1f2933;
+    }
+    .card-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #9ca3af;
+      margin-bottom: 6px;
+    }
+    .card-value {
+      font-size: 20px;
+      font-weight: 600;
+    }
+    .card-sub {
+      font-size: 11px;
+      color: #6b7280;
+    }
+    .chart-container {
+      background: #111827;
+      border-radius: 12px;
+      padding: 16px;
+      border: 1px solid #1f2933;
+      margin-bottom: 16px;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .status-good { background: #022c22; color: #6ee7b7; }
+    .status-medium { background: #422006; color: #facc15; }
+    .status-bad { background: #450a0a; color: #fca5a5; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ÓRBITA Desk • Monitor de Bem-estar</h1>
+    <div id="statusBadge" class="status-badge status-medium">Aguardando dados...</div>
+  </header>
+  <main>
+    <section class="cards">
+      <div class="card">
+        <div class="card-title">Temperatura</div>
+        <div id="tempValue" class="card-value">-- °C</div>
+        <div class="card-sub">Conforto: 21–27 °C</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Luminosidade</div>
+        <div id="lightValue" class="card-value">--</div>
+        <div class="card-sub">Maior = ambiente mais claro</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Ruído</div>
+        <div id="noiseValue" class="card-value">--</div>
+        <div class="card-sub">Maior = ambiente mais barulhento</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Índice de Conforto</div>
+        <div id="scoreValue" class="card-value">--</div>
+        <div class="card-sub">0 = péssimo • 100 = excelente</div>
+      </div>
+    </section>
+
+    <section class="chart-container">
+      <h3 style="margin-top:0;margin-bottom:8px;">Evolução dos Sensores</h3>
+      <canvas id="metricsChart" height="120"></canvas>
+    </section>
+
+    <section class="chart-container">
+      <h3 style="margin-top:0;margin-bottom:8px;">Score de Conforto</h3>
+      <canvas id="scoreChart" height="90"></canvas>
+    </section>
+
+    <section class="chart-container">
+      <h3 style="margin-top:0;margin-bottom:4px;">Resumo da Sessão</h3>
+      <p id="sessionInfo" style="font-size:14px;color:#d1d5db;margin:0;">
+        Aguardando primeiras leituras...
+      </p>
+    </section>
+  </main>
+
+  <script>
+    const apiUrl = "/api/metrics";
+
+    let metricsData = [];
+
+    // Configuração dos gráficos
+    const ctxMeta = document.getElementById("metricsChart").getContext("2d");
+    const ctxScore = document.getElementById("scoreChart").getContext("2d");
+
+    const metricsChart = new Chart(ctxMeta, {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [
+          { label: "Temp (°C)", data: [], borderWidth: 2, tension: 0.25 },
+          { label: "Luz (LDR)", data: [], borderWidth: 2, tension: 0.25 },
+          { label: "Ruído", data: [], borderWidth: 2, tension: 0.25 }
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { labels: { color: "#e5e7eb" } } },
+        scales: {
+          x: { ticks: { color: "#9ca3af" } },
+          y: { ticks: { color: "#9ca3af" } }
+        }
+      }
+    });
+
+    const scoreChart = new Chart(ctxScore, {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [
+          { label: "Score de Conforto", data: [], borderWidth: 2, tension: 0.25 }
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { labels: { color: "#e5e7eb" } } },
+        scales: {
+          x: { ticks: { color: "#9ca3af" } },
+          y: { ticks: { color: "#9ca3af" }, suggestedMin: 0, suggestedMax: 100 }
+        }
+      }
+    });
+
+    function updateDashboard() {
+      fetch(apiUrl)
+        .then(res => res.json())
+        .then(data => {
+          metricsData = data;
+          if (!metricsData.length) return;
+
+          const labels = metricsData.map(m => {
+            const d = new Date(m.timestamp);
+            return d.toLocaleTimeString("pt-BR", { hour12: false });
+          });
+
+          const temps  = metricsData.map(m => m.temperature);
+          const lights = metricsData.map(m => m.light);
+          const noises = metricsData.map(m => m.noise);
+          const scores = metricsData.map(m => m.score);
+
+          // Atualiza gráfico de sensores
+          metricsChart.data.labels = labels;
+          metricsChart.data.datasets[0].data = temps;
+          metricsChart.data.datasets[1].data = lights;
+          metricsChart.data.datasets[2].data = noises;
+          metricsChart.update();
+
+          // Atualiza gráfico de score
+          scoreChart.data.labels = labels;
+          scoreChart.data.datasets[0].data = scores;
+          scoreChart.update();
+
+          // Última leitura
+          const last = metricsData[metricsData.length - 1];
+          document.getElementById("tempValue").innerText  = last.temperature.toFixed(1) + " °C";
+          document.getElementById("lightValue").innerText = last.light;
+          document.getElementById("noiseValue").innerText = last.noise;
+          document.getElementById("scoreValue").innerText = last.score;
+
+          // Badge de status
+          const badge = document.getElementById("statusBadge");
+          badge.innerText = last.working ? "Em sessão de trabalho" : "Em pausa";
+
+          badge.className = "status-badge ";
+          if (last.score >= 80) badge.className += "status-good";
+          else if (last.score >= 50) badge.className += "status-medium";
+          else badge.className += "status-bad";
+
+          // Resumo sessão
+          const sessionInfo = document.getElementById("sessionInfo");
+          const textoSessao = last.working
+            ? `Sessão de trabalho ativa há aproximadamente ${last.workMinutes} minutos.`
+            : `Sem sessão ativa no momento. Última sessão durou cerca de ${last.workMinutes} minutos.`;
+
+          let comentario = "";
+          if (last.score >= 80) comentario = "Ambiente muito bom para trabalhar.";
+          else if (last.score >= 50) comentario = "Ambiente razoável, pode melhorar iluminação/ruído.";
+          else comentario = "Ambiente ruim: avalie pausa, luz, temperatura ou ruídos.";
+
+          sessionInfo.innerText = textoSessao + " " + comentario;
+        })
+        .catch(err => console.error("Erro ao buscar métricas:", err));
+    }
+
+    // Atualiza a cada 3 segundos
+    updateDashboard();
+    setInterval(updateDashboard, 3000);
+  </script>
+</body>
+</html>
